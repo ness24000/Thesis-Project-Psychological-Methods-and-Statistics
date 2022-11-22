@@ -1,0 +1,1052 @@
+---
+title: "Project WorkFlow"
+author: "Néstor Narbona Chulvi"
+date: "04/02/2022"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(rtweet)
+library(tidytext)
+library(SnowballC)
+library(entity)
+library(ggridges) 
+```
+
+**0.Get tweets including 'Joe Biden' from the last week.**
+
+```{r}
+#tweets <- search_tweets("Biden", 
+#                         n = 1000,
+#                       since ="2021-12-18", #can only go 7 days back!
+#                      until = "2021-12-25", 
+#                        include_rts = FALSE, 
+#                        retryonratelimit = TRUE)
+
+tweets <- ds_tweets
+```
+
+
+**Retain only Tweets that include only the name 'Joe Biden' or only the name 'Biden'**
+I want to do this so the sentiment valence of the tweet can be more validly interpreted as attitude towards Joe Biden. If there are more names in the tweet, it is unclear to which person the sentiment valence applies to. 
+
+```{r}
+
+names <- person_entity(tweets$text) #the function from entity that finds names
+
+new_names <- matrix(NA,length(names),2)
+
+#this forloop gives to each tweet one string containing all the names detected in the tweet
+for(i in 1:length(names)){ 
+  new_names[i,1] <- i
+  new_names[i,2] <- ifelse(length(as.vector(unlist(names[i])))>0,paste(names[[i]], collapse = " "),NA)
+}
+
+tweets <- tweets%>%
+  add_column(names = new_names[,2])
+
+tweets_JB <- tweets%>% #containts tweets if and only if the mentioned Joe Biden or Biden
+  filter(names %in% c('Joe Biden', 'Biden'))
+
+
+
+```
+
+**Taking users,links and code out of the tweets**
+```{r}
+tweets_JB$text <- gsub('http?\\S+','',tweets_JB$text) #delete links
+tweets_JB$text<- gsub('<\\S+>','',tweets_JB$text) #delete weird code
+tweets_JB$text <- gsub('@\\S+','',tweets_JB$text) #delete users
+
+
+```
+
+**Delete tweets containing interrogation marks**
+This will make sentiment analysis more valid. 
+
+```{r}
+questions <- grep('[?]',tweets_JB$text)
+tweets_JB <- tweets_JB[-(questions),]
+```
+
+
+**Retain only people who tweeted >n times**
+At the moment, n>4
+```{r}
+active_users <- tweets_JB %>% 
+  group_by(screen_name) %>% 
+  mutate(activity = n())%>%
+  filter(activity > 3)
+```
+
+**Looking for bots**
+```{r}
+active_users%>%
+  count(user_id,sort = T)
+
+active_users <- active_users%>%
+  filter(screen_name != 'tankiebot69420')%>%
+  filter(screen_name != 'PhilSmi50602350')%>%
+  filter(screen_name != 'DuRoRoDu')%>%
+  filter(screen_name != 'VippusaO')%>%
+  filter(screen_name != 'TomthunkitsMind')%>%
+  filter(screen_name != 'yhwh2be')%>%
+  filter(screen_name != 'shatermhmd')%>%
+  filter(screen_name != 'MAGA20222')
+
+```
+
+
+**Measure involvement**
+I obtain political words from Oxford Learner's Dictionaries on the category Politics (including Election, Government, International relations, Parilamente, Political views and systems, Politicians). This method will have some problems regarding capturing popular political vocabulary. Some specificity problems are expected as the corpus includes some general terms such as 'marginal' (this could be solved by looking at what words of the lexico are more frequent in tweets obtained from non-political hash tags). 
+
+Source: https://www.oxfordlearnersdictionaries.com/topic/politics?sublist=politicians_t
+
+```{r}
+text <- 'absentee ballotnounC2    
+abstainverbC2    
+abstentionnounC2    
+alternative votenounC2    
+apathynounC2    
+attack adnounC2    
+ballotnounC1    
+ballot boxnounC2    
+bundlernounC2    
+by-electionnounC2    
+campaignnounB1    
+candidacynounC2    
+candidaturenounC2    
+canvassnounC2    
+canvassverbC2    
+canvassernounC2    
+congressional districtnounC2    
+constituencynounC1    
+constituentnounC2    
+contestnounB2    
+contestverbB2    
+depositnounC2    
+deselectverbC2    
+dirty tricknounC2    
+disenfranchiseverbC2    
+electverbB2    
+electableadjectiveC1    
+electionnounB1    
+electioneeringnounC2    
+electiveadjectiveC2    
+electornounC2    
+electoraladjectiveC1    
+electoral collegenounC2    
+electoratenounC1    
+enfranchiseverbC2    
+enfranchisementnounC2    
+exit pollnounC2    
+first-past-the-postadjectiveC2    
+floating voternounC2    
+franchisenounC2    
+general electionnounC1    
+hustingsnounC2    
+incomingadjectiveC2    
+landslidenounC2    
+majoritynounB2    
+mandatenounC1    
+manifestonounC1    
+marginaladjectiveC2    
+marginalnounC2    
+national conventionnounC2    
+nominateverbC1    
+nominationnounC1    
+off yearnounC2    
+outgoingadjectiveC2    
+overall majoritynounC2    
+pollnounC1    
+pollingnounC1    
+polling boothnounC2    
+polling daynounC2    
+polling stationnounC2    
+popular votenounC2    
+postal votenounC2    
+primarynounC2    
+protest votenounB2    
+psephologistnounC2    
+psephologynounC2    
+push pollnounC2    
+push pollingnounC2    
+referendumnounC1    
+resultnounA1    
+runverbB2    
+running matenounC2    
+safe seatnounC2    
+soft moneynounC2    
+standverbB2    
+straw pollnounC2    
+swing statenounC2    
+swing votenounC2    
+swing voternounC2    
+ticketnounC2    
+turnoutnounC1    
+unelectedadjectiveC1    
+votenounB1    
+voteverbB1    
+voternounB1    
+votingnounB2    
+voting boothnounC2    
+voting machinenounC2
+agencynounB2    
+autonomousadjectiveC2    
+budgetnounB2    
+bureaunounC1    
+bureaucracynounC1    
+bureaucratnounC2    
+cabinetnounC1    
+the civil servicenounC2    
+civil servantnounC1    
+coalitionnounC1    
+commissionernounC2    
+communiquénounC2    
+constitutionnounC1    
+constitutionaladjectiveC1    
+constitutionallyadverbC1    
+corporationnounC2    
+councilnounB2    
+crownnounC1    
+departmentnounA2    
+destabilizeverbC2    
+domesticadjectiveB2    
+the executive branchnounC2    
+executive ordernounC2    
+executive privilegenounC2    
+governverbB2    
+governmentnounA2    
+the Home OfficenounC2    
+the judicial branchnounC2    
+kleptocracynounC2    
+kleptocraticadjectiveC2    
+lawnounA2    
+lawfuladjectiveC2    
+leadernounA2    
+the legislative branchnounC2    
+line-item vetonounC2    
+massnounB2    
+ministerialadjectiveC2    
+ministrynounC1    
+municipalitynounC2    
+officenounA2    
+policymakernounC1    
+policymakingnounC1    
+power grabnounC2    
+rainbow coalitionnounC2    
+red tapenounC2    
+regime changenounC1    
+rulenounB2    
+ruleverbB1    
+rulernounB1    
+rulingnounC1    
+secretarynounB2    
+statenounA2    
+stateadjectiveB1    
+the State of the Union AddressnounC2    
+town hallnounB1    
+alliancenounC1    
+alliedadjectiveC1    
+allynounC1    
+ambassadornounC1    
+arenanounC1    
+arms controlnounC2    
+axisnounC2    
+balance of powernounC2    
+bilateraladjectiveC2    
+blocnounC2    
+bordernounB1    
+bridge-buildingnounC2    
+brokerverbC2    
+colonialismnounC2    
+colonialistadjectiveC2    
+colonialistnounC2    
+commercenounC1    
+common marketnounC1    
+compactnounC2    
+confederationnounC2    
+conflictnounB2    
+conventionnounC1    
+cross-borderadjectiveC2    
+customs unionnounC2    
+detentenounC2    
+dialoguenounB2    
+diplomacynounC1    
+diplomatnounC1    
+diplomaticadjectiveC1    
+the Diplomatic ServicenounC2    
+diplomaticallyadverbC1    
+diplomatic bagnounC2    
+diplomatic corpsnounC2    
+diplomatic immunitynounC2    
+diplomatistnounC2    
+economynounB1    
+embassynounC1    
+ententenounC2    
+EUabbreviationB1    
+the European UnionnounB1    
+foreignadjectiveA2    
+the Foreign SecretarynounC2    
+the Foreign, Commonwealth and Development OfficenounC2    
+Foreign ServicenounC2    
+free tradenounC1    
+frontiernounC1    
+geopoliticaladjectiveC2    
+geopoliticsnounC2    
+globalizationnounB2    
+good-neighbourlinessnounC2    
+hard powernounC2    
+human rightnounB2    
+imperialistadjectiveC2    
+independencenounB2    
+independentadjectiveA2    
+intergovernmentaladjectiveC2    
+internationaladjectiveA2    
+internationalismnounC2    
+internationalistnounC2    
+internationalistadjectiveC2    
+internationallyadverbB1    
+isolationismnounC2    
+isolationistnounC2    
+isolationistadjectiveC2    
+multilateraladjectiveC2    
+multilateralismnounC2    
+NATOabbreviationC1    
+negotiateverbB2    
+negotiationnounB2    
+neocolonialismnounC2    
+non-aggressionnounC2    
+non-interventionnounC2    
+non-interventionismnounC2    
+non-interventionistadjectiveC2    
+partitionnounC2    
+political geographynounC2    
+power politicsnounC2    
+rapprochementnounC2    
+relationnounB1    
+relationshipnounA2    
+resolutionnounC1    
+the Schengen agreementnounC2    
+soft powernounC2    
+summitnounC1    
+thawverbC2    
+thawnounC2    
+tradenounB1    
+transatlanticadjectiveC1    
+transnationaladjectiveC2    
+treatynounC1    
+the United NationsnounB1  
+actnounB1    
+assemblynounC1    
+back benchnounC2    
+benchnounC2    
+billnounB2    
+capitolnounC2    
+chambernounC1    
+the CommonsnounC2    
+conference committeenounC2    
+congressnounB2    
+congressionaladjectiveC1    
+debatenounB2    
+debateverbB2    
+executivenounC1    
+the House of CommonsnounC2    
+the House of LordsnounC2    
+the House of RepresentativesnounC2    
+the Houses of ParliamentnounC1    
+inauguraladjectiveC2    
+inauguralnounC2    
+inaugurateverbC2    
+inaugurationnounC2    
+Inauguration DaynounC2    
+the Leader of the HousenounC2    
+the Leader of the OppositionnounC2    
+legislateverbC1    
+legislationnounC1    
+legislativeadjectiveC1    
+legislaturenounC1    
+lobbynounC2    
+lobbyverbC1    
+minority governmentnounC2    
+oppositionnounB2    
+pairingnounC2    
+parliamentnounB2    
+parliamentaryadjectiveC1    
+parliamentary privilegenounC2    
+passverbB2    
+passagenounC2    
+passingnounC1    
+pentagonnounC2    
+press gallerynounC2    
+propositionnounC1    
+prorogueverbC2    
+recessnounC2    
+repealnounC2    
+repealverbC2    
+seatnounB2    
+second chambernounC2    
+senatenounC1    
+sessionnounB2    
+sitverbC2    
+state housenounC2    
+statutenounC2    
+statute lawnounC2    
+upper chambernounC2    
+upper housenounC2    
+WestminsternounC2
+absolutismnounC2    
+activismnounC1    
+activistnounC1    
+affairnounB2    
+agitpropnounC2    
+alt-rightnounC2    
+anarchismnounC2    
+anarchistnounC2    
+anarchynounC2    
+AntifanounC2    
+apoliticaladjectiveC2    
+autonomynounC1    
+BrexitnounC2    
+BrexiteernounC2    
+brinkmanshipnounC2    
+capitalismnounC1    
+centernounB2    
+centralismnounC2    
+centralistadjectiveC2    
+centrenounB2    
+centristnounC2    
+centristadjectiveC2    
+collectivismnounC2    
+collectivistadjectiveC2    
+communismnounC1    
+communistnounC1    
+the Communist PartynounC1    
+comradenounC2    
+Con.abbreviationC2
+conservatismnounC2    
+conservativeadjectiveB2    
+conservativenounB2    
+the Conservative PartynounB2    
+constitutionalismnounC2    
+constitutionalitynounC2    
+constitutional monarchynounC2    
+coupnounC1    
+current affairsnounC1    
+Dem.abbreviationC2
+democracynounB2    
+democratnounB2    
+democraticadjectiveB2    
+the Democratic PartynounB2    
+despotnounC2    
+devolutionnounC2    
+devolvedadjectiveC2    
+devolve onphrasal verbC2
+devolve tophrasal verbC2
+devolve uponphrasal verbC2
+dictatornounC1    
+dictatorshipnounC1    
+dissidencenounC2    
+dissidentnounC2    
+dissidentadjectiveC2    
+divine rightnounC2    
+dog whistlenounC2    
+egalitariannounC2    
+egalitarianadjectiveC2    
+egalitarianismnounC2    
+exilenounC1    
+expansionismnounC2    
+expansionistnounC2    
+expansionistadjectiveC2    
+extremismnounC1    
+extremistnounC1    
+extremistadjectiveC1    
+fanaticnounC2    
+fanaticaladjectiveC2    
+fanaticallyadverbC2    
+fanaticismnounC2    
+fascismnounC2    
+fascistadjectiveC2    
+fascistnounC2    
+federaladjectiveB2    
+federal governmentB2    
+federalismnounC1    
+federalistadjectiveC1    
+federalistnounC1    
+federallyadverbB2    
+federationnounC1    
+fellow travellernounC2    
+feudaladjectiveC2    
+feudalismnounC2    
+globalismnounC1    
+globalistnounC1    
+globalistadjectiveC1    
+greenadjectiveB1    
+greennounB2    
+hard leftnounC2    
+hard rightnounC2    
+idealnounB2    
+idealismnounC2    
+identity politicsnounC2    
+ideologicaladjectiveC1    
+ideologicallyadverbC1    
+ideologuenounC2    
+ideologynounC1    
+imperialismnounC2    
+imperialistnounC2    
+interest groupnounC2    
+interventionismnounC2    
+interventionistnounC2    
+interventionistadjectiveC2    
+kingnounA2    
+Lab.abbreviationC2
+labournounB2    
+the Labour PartynounB2    
+leaguenounB2    
+leavernounC2    
+leftnounB1    
+leftismnounC2    
+leftistadjectiveC2    
+leftistnounC2    
+left wingnounC1    
+left-wingadjectiveC1    
+left-wingernounC1    
+LeninismnounC2    
+LeninistadjectiveC2    
+LeninistnounC2    
+Lib DemabbreviationC2    
+liberaladjectiveC1    
+the Liberal DemocratsnounC2    
+liberalismnounC1    
+libertariannounC2    
+mainstreamnounC1    
+MarxismnounC2    
+MarxistnounC2    
+MarxistadjectiveC2    
+militarismnounC2    
+militaristnounC2    
+militaristicadjectiveC2    
+moderateadjectiveC1    
+moderatenounC1    
+monarchnounB2    
+monarchynounB2    
+movementnounB1    
+nationalismnounC2    
+nationalistadjectiveC2    
+nationalistnounC2    
+nationalisticadjectiveC2    
+neoconservativeadjectiveC2    
+neoconservativenounC2    
+neoliberaladjectiveC2    
+neoliberalismnounC2    
+non-partisanadjectiveC2    
+non-violencenounC2    
+non-violentadjectiveC2    
+oligarchynounC2    
+PACabbreviationC2    
+pacifismnounC2    
+pacifistadjectiveC2    
+pacifistnounC2    
+partynounB1    
+party linenounC2    
+party politicaladjectiveC2    
+party political broadcastnounC2    
+party politicsnounC2    
+people powernounC2    
+platformnounC2    
+police statenounC1    
+policynounB1    
+politicaladjectiveB1    
+political action committeenounC2    
+political capitalnounC2    
+politicallyadverbB1    
+political sciencenounC1    
+political scientistnounC1    
+politicsnounB1    
+populismnounC2    
+populistadjectiveC2    
+populistnounC2    
+powernounA2    
+pressure groupnounC2    
+pro-prefixC1    
+propagandanounC1    
+proportional representationnounC2    
+queennounA2    
+radicaladjectiveC1    
+radicalnounC1    
+radicalismnounC2    
+rallynounC1    
+reactionaryadjectiveC2    
+reactionarynounC2    
+redadjectiveC1    
+rednounC1    
+reformnounC1    
+reformverbC1    
+reformernounC1    
+reformistadjectiveC2    
+regimenounC1    
+RemainernounC2    
+RemoanernounC2    
+Rep.abbreviationC2
+representativeadjectiveC1    
+republicnounC1    
+republicannounC2    
+republicanadjectiveC2    
+the Republican PartynounC1    
+republicanismnounC2    
+revisionistadjectiveC2    
+revisionistnounC2    
+revoltnounC2    
+revoltverbC2    
+revolutionnounB2    
+revolutionaryadjectiveC1    
+revolutionarynounC1    
+the right wingnounC1    
+rightistnounC2    
+rightistadjectiveC2    
+right-wingadjectiveC1    
+right-wingernounC1    
+the Scottish National PartynounB2    
+secularismnounC2    
+secularistadjectiveC2    
+slogannounB2    
+smearverbC2    
+smearnounC2    
+socialismnounC1    
+socialistadjectiveC1    
+special interest groupnounC2    
+speechnounA2    
+spinnounC2    
+statismnounC2    
+statistadjectiveC2    
+statistnounC2    
+supportverbA2    
+supporternounB1    
+TorynounC2    
+ToryadjectiveC2    
+ToryismnounC2    
+tyrantnounC2    
+unilateralismnounC2    
+unilateralistnounC2    
+unilateralistadjectiveC2    
+unrestnounC2    
+uprisingnounC2    
+utilitarianadjectiveC2    
+utilitarianismnounC2    
+utopianadjectiveC2    
+utopianismnounC2    
+wingnounC1    
+witch-huntnounC2  
+backbenchernounC2    
+chancellornounC2    
+Chief WhipnounC2    
+congresswomannounB2    
+councillornounC1    
+demagoguenounC2    
+deputynounC1    
+FLOTUSabbreviationC2    
+the front benchnounC2    
+governornounB2    
+Home SecretarynounC2    
+independentnounC1    
+leadershipnounB2    
+legislatornounC1    
+majority whipnounC2    
+mayornounB2    
+Member of CongressnounB2    
+Member of ParliamentnounB1    
+ministernounB2    
+MPnounB1    
+oligarchnounC2    
+parliamentariannounC2    
+PMnounB2    
+politiciannounB1    
+POTUSabbreviationC2    
+premiernounC2    
+presidentnounA2    
+prime ministernounB1    
+representativenounB2    
+Secretary of StatenounC2    
+senatornounC1    
+shadowadjectiveC2    
+speakernounC2    
+spin doctornounC2    
+spokesmannounB2    
+spokespersonnounB2    
+spokeswomannounB2    
+statesmannounC1    
+whipnounC2'
+
+A <- gsub('C\\d|B\\d|A\\d',",",text) #delete english level
+A <- gsub('\n','',A)
+A <- gsub('noun|verb|adjective|pronoun','',A) #delete grammatical category
+A <- gsub('\\s\\W','',A) #delete the big sapaces that appear before each word or combination of words
+A <- strsplit(A,",")[[1]]
+regex_pol <- paste(A,collapse = "|")
+regex_pol <- tolower(regex_pol)
+regex_pol <- gsub(' ','?',regex_pol)  #regex method allows for a better recognition than the inner_join method
+
+
+#i also save the document as a dataframe
+oxf_pol <- data.frame(word = A)
+
+write.csv(oxf_pol,'oxf_pol.csv',row.names = F)
+
+```
+
+Another problem of this wordlist is that it doesn't include political figures' names or political organization names. Thus, we perform two name entity recognition of tweets from @nytimespolitics, @usatodayDC and @foxnewpolitics to find most popular and talked about political figures and organizations 
+
+TO JUSTIFY NEWSPAPERS SELECTIONS: file:///C:/Users/user/Downloads/Political-Polarization-and-Media-Habits-FINAL-REPORT-7-27-15.pdf *(p.22)*
+
+```{r}
+#get tweets 
+  newspapers <- get_timeline(c('nytpolitics','foxnewspolitics','usatodayDC'),1000)
+
+#get names
+politicians_or <- person_entity(newspapers$text)
+organizations_or <- organization_entity(newspapers$text)
+
+#get output of function into a usable format and selecting mos frequent
+politicians <- data.frame(words = tolower((unlist(politicians_or))))
+politicians <- politicians%>%
+  count(words)%>%
+  filter(n>3)
+
+organizations <- data.frame(words = tolower((unlist(organizations_or))))
+organizations <- organizations%>%
+  count(words)%>%
+  filter(n>3)
+
+#some manual changes
+  politicians <- politicians[-c(58,20,47,12,18,43,22,31),] #deleting some generic names (e.g. Jordan)
+  politicians <- politicians%>%
+    add_case(words = c('putin','trudeau','democr','republ'), n = rep(NA,4)) #adding some notable absences
+  
+  organizations <- organizations[-c(21,22,23,44,47),] #(e.g. us,hourse)
+
+#creating the list with some useful properties
+polits_list <- politicians$words
+
+polits_list <- paste(polits_list,collapse = '|') #one single string that grep() will understand as any of this names
+polits_list <- gsub(' ', '?',polits_list) #so even if spaces are omitted the name is identified
+
+orgs_list <- organizations$words
+
+orgs_list <- paste(orgs_list,collapse = '|') #one single string that grep() will understand as any of this names
+orgs_list <- gsub(' ', '?',orgs_list) #so even if spaces are omitted the name is identified
+
+entities_list <- paste(c(polits_list,orgs_list),collapse = '|')
+
+```
+
+
+Based on this political lexicon and names list, we asses how many of each user's last 100 tweets were political. This value is their *involvement score*. At some point the forloop is asking for too many tweets and it stops, it must then be done in batches
+
+
+```{r}
+IDs <- unique(active_users$user_id)
+
+#matrix to store involvement  
+pol_inv <- matrix(c(IDs,rep(0,2*length(IDs))),length(IDs),3)
+
+#matrix to store a sample of categorized tweets to check the precision and recall of the method
+samp <- matrix(c(IDs,rep(NA,2*length(IDs))),length(IDs),3)
+
+#the loop itself
+
+for(u in 860:length(IDs)){
+  
+  tl_try <- get_timeline(IDs[u])
+  pol_tweets_n <- 0 #counter of political tweets for this particular user
+  ind <- sample(1:length(tl_try$text),1) #to store a random tweet for evaluation
+  figures <- 0 #a counter to see how relevant the figures and organization detection is
+  
+  if(length(tl_try$text)<1){#to ignore users that doesn't give access to their TL
+    pol_inv[u,2] <- NA
+    pol_inv[u,3] <- NA
+  } else {
+    
+    for(i in 1:length(tl_try$text)){
+      
+      wrds <- grep(regex_pol, tolower(tl_try$text[i])) #see if theres any pol word in tweet
+      if(length(wrds) > 0){
+        pol_tweets_n <- pol_tweets_n + 1 #if POLITICAL WORDS > 0, add to counter
+      } else {
+        figs <- grep(entities_list,tolower(tl_try$text[i])) #see if political fig/orgs in tweets 
+        if(length(figs)>0){
+          pol_tweets_n <- pol_tweets_n + 1 #if POLITICAL FITURES found != 0, add to counter
+          figures <- figures+1
+        } 
+      } 
+      
+      if(i == ind){   #store one random tweet & category per user for evaluation
+        samp[u,2] <- tl_try$text[i]
+        if (length(wrds) > 0|length(figs) > 0){
+          samp[u,3] <- 'pol'
+        } else {
+          samp[u,3] <- 'not_pol'
+        }
+      }
+    }
+    
+    pol_inv[u,2] <- pol_tweets_n #number of political tweets for this user
+    pol_inv[u,3] <- length(tl_try$text) #keep track of how many total tweets we obtained from this user
+    
+  }
+}
+
+
+pol_inv_df <- data.frame(ID = pol_inv[,1],pol_tw =  as.numeric(pol_inv[,2]),pol_tot=as.numeric(pol_inv[,3])) #transformed into a dataframe
+```
+
+A graph showing distribution of *involvement* and another graph showing total number of tweets obtained. This last graph and the table are used to check to what extend we can use the absolute number of political tweets to compare individuals.
+
+```{r}
+
+ggplot(pol_inv_df, aes(pol_tw))+
+  geom_histogram(bins = 40)
+
+ggplot(pol_inv_df, aes(pol_tot))+
+  geom_histogram(bins = 15)
+
+table(pol_inv_df$pol_tot)
+```
+
+
+**4. Measure attitudes**
+
+Using the *afinn* dictionary. 
+```{r}
+
+library(tidytext)
+
+#Lexicon
+sent_dic <- get_sentiments("afinn") 
+
+#tokenize
+X = 1:length(active_users$user_id)
+active_users <- active_users%>%
+  add_column(X)
+
+bigrams <- active_users%>% #we need to group by X (i.e. post), otherwise considers all posts of user 1 same text
+  group_by(X)
+
+bigrams <- bigrams %>% 
+  unnest_tokens(word, text, token = "ngrams", n = 2)%>%
+  separate(word,c('word1','word2'), sep = " ")%>%
+  inner_join(bigrams)
+
+#negation words
+
+neg = c('hardly','lack','neither','nor','never','no','nobody','none','nothing','nowhere','not','cannot','without')
+
+bigrams <- bigrams%>%
+  mutate(neg = ifelse(word1 %in% neg,-1,1))
+
+#apply lexicon taking into account negation words
+bigrams_sent <- bigrams %>%
+  inner_join(sent_dic,by = c(word2 = 'word'))%>%
+  mutate(value = value * neg)
+
+#take into account sentiment words that are never in word2 (i.e. the first words in each tweet)
+frst_wrd <- data.frame(screen_name = character(),word = character())
+
+for(i in 1:length(active_users$text)){                      #we find the first word in each tweet
+  words <- unnest_tokens(active_users[i,],word,text)
+  frst_wrd <- frst_wrd%>%
+    add_row(words[1,])
+}
+
+frst_wrd_sent <- frst_wrd%>%
+  inner_join(sent_dic)%>%
+  select(-word)
+
+final_sent <- bigrams_sent%>%        #add first words with sentiment value to the data set
+  group_by()%>%
+  select(screen_name,value)%>%
+  add_row(frst_wrd_sent)
+
+
+#calculate sentiment per person
+sentim <- final_sent %>% 
+  mutate(screen_name = as.factor(screen_name)) %>% 
+  group_by(screen_name) %>% 
+  summarise(sent = mean(value)) 
+
+hist(sentim$sent, breaks = 7)
+sd(sentim$sent)/sqrt(length(sentim$sent))
+
+
+```
+
+**5. Relationship between **
+Look for correlation between absolute attitudes and involvement and plot attitudes at four different levels of involvement. 
+```{r}
+
+last_tw <- sentim%>%
+  inner_join(active_users)%>%
+  select(ID = user_id,sent)%>%
+  inner_join(pol_inv_df)%>%
+  na.omit()%>%
+  distinct()
+
+library(forcats)
+
+last_tw <- last_tw%>%
+  mutate(quantilegroup = ntile(pol_tw, 4))%>%
+  mutate(quantilegroup = factor(quantilegroup))
+
+levels(last_tw$quantilegroup) <- c('Low','Mid-low','Mid-high','High')
+
+last_tw %>% 
+  mutate(quantilegroup = quantilegroup) %>% 
+  ggplot(aes(x = sent, y = quantilegroup)) + 
+  geom_density_ridges(fill = 'white',alpha = 0,lty = 1)+
+  xlim(-5,5)+
+  xlab('Sentiment')+
+  ylab('Involvement')+
+  theme_minimal()+
+  theme(panel.grid.major.y = element_blank(),
+        axis.ticks.x = element_line(color = 'grey95'),
+        text = element_text(family = 'CMU Serif',size = 14))
+
+fonttable()
+
+last_tw %>%
+  group_by(as.factor(quantilegroup))%>%
+  summarise(mean(abs(sent)))
+
+
+cor(abs(last_tw$sent),last_tw$pol_tw)
+
+plot(last_tw$pol_tw,abs(last_tw$sent))
+
+ggplot(last_tw,aes(pol_tw,abs(sent)))+
+  geom_point(position = 'jitter')
+```
+
+**6. Fitting the cusp model**
+```{r}
+#create the data set to feed into the cusp function
+data <- sentim%>%
+  inner_join(tweets)%>%
+  select(ID = user_id,sent)%>%
+  unique()%>%
+  inner_join(pol_inv_df)%>%
+  select(-pol_tot,invol = pol_tw)%>%
+  subset(!is.na(invol))
+
+
+#fit the linear, restricted and unrestricted model 
+
+library(cusp)
+
+fit <- cusp(y ~ sent, alpha ~ 1, beta ~ invol, data) 
+
+summary(fit)
+summary(fit_logit)
+
+#linear
+linear <- lm(sent ~ invol,data)
+summary(linear)
+
+ggplot(data,aes(x = invol,y = sent))+
+  geom_point(position = 'jitter', size = 0.5)+
+  geom_smooth(method = 'lm',se = F,color = 'red',lwd = 0.7,lty = 1)+
+  theme_bw()+
+  xlab('Involvement')+
+  ylab('Attitudes')
+  scale_x_continuous(breaks = seq(0,100,10))+
+  scale_y_continuous(breaks = seq(-5,5,1),limits = c(-5,5))+
+  theme(panel.grid.minor = element_blank(),
+        text = element_text(family = 'CMU Serif'))
+
+
+#unrestricted 
+summary(fit)
+
+
+plot(fit)
+
+fit2 <- cusp(y ~ sent, alpha ~ invol, beta ~ invol, data)  #unrestricted
+summary(fit2)
+
+
+cusp::plotCuspBifurcation(fit)
+
+plotCuspBifurcation(fit)
+```
+**EXTRA: Checking the per post version of the political attitudes measurment**
+
+```{r}
+#did we average out extreme opinions?
+sent <- get_sentiments('afinn')
+n_tweets <- active_users%>%
+  group_by(status_id)%>%
+  unnest_tokens(word,text)%>%
+  inner_join(sent)%>%
+  summarise(sent = mean(value))%>%
+  inner_join(active_users)%>%
+  select(user_id,status_id,sent)%>%
+  rename(ID = user_id)%>%
+  inner_join(pol_inv_df)%>%
+  subset(!is.na(pol_tw))%>%
+  mutate(pol_tw_inv = 101 - pol_tw)
+
+
+#Comparing the the two per_user and per_post design
+#per tweet = 0
+#per user = 1
+lvn <- data.frame(sent = c(n_tweets$sent,data$sent),
+           grp = c(rep(0,length(n_tweets$status_id)),rep(1,length(data$ID))))
+
+leveneTest(lvn$sent,lvn$grp)
+
+ggplot(lvn,aes(x = factor(grp),y = sent))+
+  geom_boxplot()
+
+
+###ggridges
+n_tweets <- n_tweets%>%
+  mutate(quantilegroup = ntile(pol_tw, 4))%>%
+  mutate(quantilegroup = factor(quantilegroup))
+
+levels(n_tweets$quantilegroup) <- c('Low','Mid-low','Mid-high','High')
+
+combi1 <- n_tweets%>%
+  select(sent,quantilegroup)%>%
+  mutate(grp = 'Per Post')%>%
+  mutate(grp = factor(grp))
+
+
+
+  
+combi2 <- last_tw%>%
+  select(sent,quantilegroup)%>%
+  mutate(grp = 'Per User')%>%
+  mutate(grp = factor(grp),quantilegroup=factor(quantilegroup))%>%
+  add_row(combi1)
+
+levels(combi2$quantilegroup) <- c('Low','Mid-low','Mid-high','High')
+
+  
+head(combi1)
+head(combi2)
+
+combi2 %>% 
+  ggplot(aes(x = sent, y = quantilegroup,fill = grp)) + 
+  geom_density_ridges(alpha = 0.8,lty = 1)+
+  xlim(-5,5)+
+  xlab('Sentiment')+
+  scale_fill_manual(values = c('Per post' = '#c6c6c6','Per user' = 'black'))+
+  ylab('Involvement')+
+  theme_bw()+
+  theme(panel.grid.major.y = element_blank(),
+        axis.ticks.x = element_line(color = 'grey95'),
+        text = element_text(family = 'CMU Serif',size = 14))
+
+```
+
+
+
